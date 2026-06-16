@@ -119,6 +119,7 @@
           const [isFetchingPubMed, setIsFetchingPubMed] = useState(false);
           const [isPubMedOpen, setIsPubMedOpen] = useState(false);
           const [pubMedLinks, setPubMedLinks] = useState([]);
+          const [pubMedStatus, setPubMedStatus] = useState("");
 
           const canvasRef = useRef(null);
           const fileInputRef = useRef(null);
@@ -263,67 +264,105 @@
             }
           };
 
+          const geminiPost = (prompt) =>
+            fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            }).then(r => r.json()).then(d => d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
+
           const searchPubMed = async () => {
             if (!pubMedQuery.trim()) { setApiError("Zadaj tému na výskum."); return; }
             if (!requireApiKey()) return;
-            setIsFetchingPubMed(true); setApiError(""); setPubMedResults(""); setPubMedLinks([]); setPubMedOptimizedQuery("");
+            setIsFetchingPubMed(true); setApiError(""); setPubMedResults(""); setPubMedLinks([]);
+            setPubMedOptimizedQuery(""); setPubMedStatus("🔍 Prekladám dopyt do angličtiny...");
 
             try {
-                // ✅ Model: gemini-2.5-flash — stabilný
-                const optRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: `Translate and optimize this user query into a highly specific English search query for the PubMed database. Use appropriate boolean operators (AND, OR) if needed. Return ONLY the English search query string, nothing else. User query: "${pubMedQuery}"` }] }]
-                    })
-                });
-
-                if (!optRes.ok) {
-                  const errData = await optRes.json().catch(() => ({}));
-                  throw new Error(errData?.error?.message || `HTTP ${optRes.status}`);
-                }
-                const optData = await optRes.json();
-                const optimizedSearchTerm = optData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || pubMedQuery;
+                // 1. Preložiť dopyt
+                const optimizedSearchTerm = await geminiPost(
+                  `Translate and optimize this query for PubMed database search. Use boolean operators if needed. Return ONLY the search string, nothing else. Query: "${pubMedQuery}"`
+                ) || pubMedQuery;
                 setPubMedOptimizedQuery(optimizedSearchTerm);
+                setPubMedStatus("🔎 Hľadám v PubMed databáze...");
 
+                // 2. Vyhľadať 4 ID
                 const searchRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(optimizedSearchTerm)}&retmode=json&retmax=4`);
                 if (!searchRes.ok) throw new Error("Nepodarilo sa pripojiť k PubMed.");
-                const searchData = await searchRes.json();
-                const ids = searchData.esearchresult.idlist;
+                const ids = (await searchRes.json()).esearchresult?.idlist || [];
 
-                if (!ids || ids.length === 0) {
-                    setPubMedResults(`Nenašli sa žiadne štúdie pre termín: ${optimizedSearchTerm}`);
-                    setIsFetchingPubMed(false);
-                    return;
+                if (ids.length === 0) {
+                  setPubMedResults(`Nenašli sa žiadne štúdie pre: ${optimizedSearchTerm}`);
+                  return;
+                }
+                setPubMedLinks(ids.map(id => `https://pubmed.ncbi.nlm.nih.gov/${id}/`));
+                setPubMedStatus("📄 Sťahujem abstrakty...");
+
+                // 3. Stiahnuť abstrakty všetkých 4
+                const abstractXml = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids.join(',')}&retmode=xml`)
+                  .then(r => r.text());
+
+                // 4. AI vyberie 2 najrelevantnejšie ID
+                setPubMedStatus("🤖 AI vyberá 2 najrelevantnejšie články...");
+                const pickRaw = await geminiPost(
+                  `Z nasledujúcich abstraktov PubMed vyber 2 ID článkov NAJPRESNEJŠIE relevantné k téme: "${pubMedQuery}".
+Vráť IBA JSON pole s 2 číslami, napr: ["12345678","87654321"]. Nič iné.
+Dostupné ID: ${ids.join(', ')}
+Abstrakty:\n${abstractXml.substring(0, 6000)}`
+                );
+                let selectedIds = ids.slice(0, 2);
+                try {
+                  const clean = pickRaw.replace(/```json/gi,'').replace(/```/g,'').trim();
+                  const picked = JSON.parse(clean);
+                  if (Array.isArray(picked) && picked.length >= 2) selectedIds = picked.slice(0,2).map(String);
+                } catch(e) {}
+
+                // 5. Pre každé vybrané ID skúsiť PMC plný text, fallback na abstrakt
+                setPubMedStatus("📚 Sťahujem plné texty (PMC)...");
+                const articleTexts = [];
+                for (const pmid of selectedIds) {
+                  let text = '';
+                  try {
+                    // elink: PubMed → PMC
+                    const elinkData = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?dbfrom=pubmed&db=pmc&id=${pmid}&retmode=json`)
+                      .then(r => r.json());
+                    const pmcIds = elinkData?.linksets?.[0]?.linksetdbs?.find(l => l.dbto === 'pmc')?.links || [];
+
+                    if (pmcIds.length > 0) {
+                      const fullXml = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id=${pmcIds[0]}&retmode=xml`)
+                        .then(r => r.text());
+                      text = `[PMID ${pmid} — PLNÝ TEXT z PMC]\n${fullXml.substring(0, 10000)}`;
+                    }
+                  } catch(e) {}
+
+                  if (!text) {
+                    // fallback na abstrakt
+                    const abXml = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmid}&retmode=xml`)
+                      .then(r => r.text());
+                    text = `[PMID ${pmid} — ABSTRAKT]\n${abXml.substring(0, 4000)}`;
+                  }
+                  articleTexts.push(text);
                 }
 
-                const links = ids.map(id => `https://pubmed.ncbi.nlm.nih.gov/${id}/`);
-                setPubMedLinks(links);
+                // 6. Kvalitný sumár
+                setPubMedStatus("✍️ Generujem kvalitný súmar...");
+                const summaryPrompt = `Si vedecký komunikátor a Instagram copywriter. Nižšie sú 2 vedecké články (alebo ich abstrakty) z PubMed k téme "${pubMedQuery}".
 
-                const fetchRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids.join(',')}&retmode=xml`);
-                const xmlText = await fetchRes.text();
+${articleTexts.join('\n\n---\n\n')}
 
-                const summaryPrompt = `Tu sú abstrakty štúdií z databázy PubMed k téme "${pubMedQuery}":\n\n${xmlText.substring(0, 8000)}\n\nVytvor stručný výťah najdôležitejších záverov v slovenčine. Zásadné pravidlo: Vysvetli to ľudskou rečou pre laikov, vyhni sa ťažkým medicínskym termínom (alebo ich hneď vysvetli). Zvýrazni (**tučným písmom**) tie najzaujímavejšie fakty a vety, ktoré sú vyslovene ideálne pre priame použitie a skopírovanie do Instagram slidov. Čerpaj len z poskytnutého textu.`;
+Vytvor KVALITNÝ výťah pre Instagram v slovenčine:
+- Vysvetli kľúčové zistenia ĽUDSKOU rečou, bez ťažkých termínov (alebo ich ihneď vysvetli)
+- Zvýrazni **tučným písmom** tie najzaujímavejšie fakty ideálne na skopírovanie do slidov
+- Uveď konkrétne čísla/percentá ak existujú
+- Buď vecný ale pútavý, max 300 slov
+- Čerpaj LEN z poskytnutého textu, nevymýšľaj`;
 
-                // ✅ Model: gemini-2.5-flash — stabilný
-                const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: summaryPrompt }] }] })
-                });
-
-                if (!aiRes.ok) {
-                  const errData = await aiRes.json().catch(() => ({}));
-                  throw new Error(errData?.error?.message || `HTTP ${aiRes.status}`);
-                }
-                const aiData = await aiRes.json();
-                const summaryText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
-                setPubMedResults(summaryText || "Nepodarilo sa vygenerovať sumár.");
+                const summary = await geminiPost(summaryPrompt);
+                setPubMedResults(summary || "Nepodarilo sa vygenerovať sumár.");
 
             } catch (e) {
                 setApiError("PubMed chyba: " + e.message);
             } finally {
                 setIsFetchingPubMed(false);
+                setPubMedStatus("");
             }
           };
 
@@ -573,18 +612,30 @@ PRAVIDLÁ PRE outro slide:
                       });
                   }
                 } else {
-                  ctx.fillStyle = brandColor; ctx.font = 'bold 32px system-ui'; ctx.fillText(`0${slideIndex}`, textX, titleY - 145);
+                  // Slide number — vždy plná šírka hore
+                  ctx.fillStyle = brandColor; ctx.font = 'bold 32px system-ui'; ctx.fillText(`0${slideIndex}`, 80, titleY - 145);
+
+                  // Titul — vždy plná šírka (je nad obrazkom)
                   ctx.fillStyle = '#ffffff'; ctx.font = '900 62px system-ui';
                   const titleWords = (slide.title || '').split(' ');
                   let currentTitleLine = ''; let currY = titleY;
                   for (let i = 0; i < titleWords.length; i++) {
                      let testLine = currentTitleLine + titleWords[i] + ' ';
-                     if (ctx.measureText(testLine).width > textMaxWidth && i > 0) {
-                         ctx.fillText(currentTitleLine.trim(), textX, currY);
+                     if (ctx.measureText(testLine).width > (width - 160) && i > 0) {
+                         ctx.fillText(currentTitleLine.trim(), 80, currY);
                          currentTitleLine = titleWords[i] + ' '; currY += 70;
                      } else { currentTitleLine = testLine; }
                   }
-                  ctx.fillText(currentTitleLine.trim(), textX, currY);
+                  ctx.fillText(currentTitleLine.trim(), 80, currY);
+
+                  // Dynamické constraints textu podľa Y pozície (obteká obrazok)
+                  const getConstraints = (y) => {
+                    if (!hasImage) return { x: 80, maxW: width - 160 };
+                    const inZone = y > imgY - 20 && y < imgY + imgSize + 30;
+                    if (layout.includes('right') && inZone) return { x: 80, maxW: imgX - 120 };
+                    if (layout.includes('left') && inZone) return { x: imgX + imgSize + 40, maxW: width - (imgX + imgSize + 40) - 80 };
+                    return { x: 80, maxW: width - 160 };
+                  };
 
                   const content = slide.content || '';
                   const paragraphs = content.split('\n');
@@ -593,7 +644,8 @@ PRAVIDLÁ PRE outro slide:
                   paragraphs.forEach(paragraph => {
                     if(!paragraph.trim()) { textBodyY += 25; return; }
                     const tokens = parseMarkdownBold(paragraph);
-                    let currentX = textX;
+                    let cons = getConstraints(textBodyY);
+                    let currentX = cons.x;
                     tokens.forEach(token => {
                       const words = token.text.split(' ');
                       words.forEach((word, wordIdx) => {
@@ -602,8 +654,10 @@ PRAVIDLÁ PRE outro slide:
                         ctx.font = `${token.isBold ? '900' : 'normal'} 34px system-ui`;
                         const wordWidth = ctx.measureText(wordWithSpace).width;
 
-                        if (currentX + wordWidth > textX + textMaxWidth) {
-                          currentX = textX; textBodyY += 55;
+                        if (currentX + wordWidth > cons.x + cons.maxW) {
+                          textBodyY += 55;
+                          cons = getConstraints(textBodyY);
+                          currentX = cons.x;
                         }
                         ctx.fillStyle = token.isBold ? '#ffffff' : '#d1d5db';
                         ctx.fillText(wordWithSpace, currentX, textBodyY);
@@ -774,6 +828,7 @@ PRAVIDLÁ PRE outro slide:
                             </div>
 
                             {pubMedOptimizedQuery && <p className="text-[9px] text-slate-500 italic">Preložený dopyt: {pubMedOptimizedQuery}</p>}
+                            {pubMedStatus && <p className="text-[10px] text-teal-400 mt-1 animate-pulse">{pubMedStatus}</p>}
                             {apiError && <p className="text-xs text-rose-500 mt-2">{apiError}</p>}
 
                             {pubMedLinks.length > 0 && (
