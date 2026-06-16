@@ -38,10 +38,11 @@
             Search: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>,
             ChevronDown: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"></path></svg>,
             ChevronUp: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7"></path></svg>,
-            Image: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+            Image: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>,
+            Key: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
         };
 
-        const apiKey = "AQ.Ab8RN6JmPszN-l_bJonJIpBH4yQGQEgbU2JEikSaaQajfi5qmA"; // Váš API kľúč
+        // API kľúč bol odstránený z global scope — načítava sa z localStorage cez React State
 
         const INITIAL_SLIDES = [
           {
@@ -67,18 +68,36 @@
             { id: 'none', label: 'Žiadny obrázok' }
         ];
 
+        // Bezpečné sanitovanie HTML pre dangerouslySetInnerHTML (ochrana proti XSS)
+        const sanitizeHtml = (html) => {
+            return html
+                .replace(/<script[\s\S]*?<\/script>/gi, '')
+                .replace(/on\w+="[^"]*"/gi, '')
+                .replace(/on\w+='[^']*'/gi, '')
+                .replace(/<iframe[\s\S]*?<\/iframe>/gi, '');
+        };
+
         function App() {
+          // ✅ FIX: API kľúč v React State, načítaný z localStorage
+          const [apiKey, setApiKey] = useState(() => localStorage.getItem('insta_v7_apiKey') || "");
+          const [showApiKey, setShowApiKey] = useState(false);
+
           const [slides, setSlides] = useState(() => {
-            const saved = localStorage.getItem('insta_v7_slides');
-            return saved ? JSON.parse(saved) : INITIAL_SLIDES;
+            try {
+              const saved = localStorage.getItem('insta_v7_slides');
+              return saved ? JSON.parse(saved) : INITIAL_SLIDES;
+            } catch {
+              // Ochrana pred korumpovaným JSON v localStorage
+              return INITIAL_SLIDES;
+            }
           });
           const [activeIndex, setActiveIndex] = useState(0);
-          
+
           const [instagramHandle, setInstagramHandle] = useState(() => localStorage.getItem('insta_v7_handle') || "@tvoj_profil");
           const [brandColor, setBrandColor] = useState(() => localStorage.getItem('insta_v7_color') || "#3b82f6");
           const [bgColor, setBgColor] = useState(() => localStorage.getItem('insta_v7_bgColor') || "#0b0f19");
           const [avatarPreview, setAvatarPreview] = useState(() => localStorage.getItem('insta_v7_avatar') || "");
-          
+
           const [topic, setTopic] = useState("");
           const [loading, setLoading] = useState(false);
           const [apiError, setApiError] = useState("");
@@ -103,6 +122,8 @@
           const slideImageFileInputRef = useRef(null);
           const imageCache = useRef({});
 
+          // ✅ FIX: Ukladanie API kľúča do localStorage
+          useEffect(() => { localStorage.setItem('insta_v7_apiKey', apiKey); }, [apiKey]);
           useEffect(() => { localStorage.setItem('insta_v7_slides', JSON.stringify(slides)); }, [slides]);
           useEffect(() => { localStorage.setItem('insta_v7_handle', instagramHandle); }, [instagramHandle]);
           useEffect(() => { localStorage.setItem('insta_v7_color', brandColor); }, [brandColor]);
@@ -131,6 +152,28 @@
             }, 300);
             return () => clearTimeout(timer);
           }, [editTitle, editContent, editBullets]);
+
+          // ✅ Helper: guard pre prázdny API kľúč
+          const requireApiKey = () => {
+            if (!apiKey.trim()) {
+              setApiError("⚠️ Chýba Gemini API kľúč. Vlož ho v sekcii 'Nastavenie Profilu'.");
+              return false;
+            }
+            return true;
+          };
+
+          const addBlankSlide = () => {
+            const newSlide = {
+              type: "content",
+              title: "",
+              content: "",
+              imageLayout: "none",
+              image: null
+            };
+            const updated = [...slides, newSlide];
+            setSlides(updated);
+            setActiveIndex(updated.length - 1);
+          };
 
           const handleAvatarChange = (e) => {
             const file = e.target.files[0];
@@ -168,23 +211,28 @@
 
           const generateNanobananaImage = async () => {
             if (!imagePrompt.trim()) { setApiError("Zadaj slovný popis pre obrázok."); return; }
+            if (!requireApiKey()) return;
             setImgLoading(true); setApiError("");
 
             const userPrompt = `Minimalist flat vector icon graphic of: ${imagePrompt}, isolated on a clean elegant background, very simple modern style, 2d design`;
 
             try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`, {
+                // ✅ Model: gemini-2.5-flash-preview-05-20 je aktuálny odporúčaný pre image generation
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     contents: [{ parts: [{ text: userPrompt }] }],
-                    generationConfig: { responseModalities: ["IMAGE"] }
+                    generationConfig: { responseModalities: ["IMAGE", "TEXT"] }
                   })
                 });
 
-                if (!response.ok) throw new Error("Chyba API pre obrázky");
+                if (!response.ok) {
+                  const errData = await response.json().catch(() => ({}));
+                  throw new Error(errData?.error?.message || `HTTP ${response.status}`);
+                }
                 const data = await response.json();
-                
+
                 const base64Data = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
                 if (base64Data) {
                   const finalImageUrl = `data:image/png;base64,${base64Data}`;
@@ -197,7 +245,7 @@
                   setSlides(updated);
                   setImagePrompt("");
                 } else {
-                    throw new Error("Obrázok nebol vygenerovaný.");
+                    throw new Error("Obrázok nebol vygenerovaný — skontroluj, či má tvoj API kľúč povolené image generation.");
                 }
             } catch (e) {
                 setApiError("AI Obrázok zlyhal: " + e.message);
@@ -208,9 +256,11 @@
 
           const searchPubMed = async () => {
             if (!pubMedQuery.trim()) { setApiError("Zadaj tému na výskum."); return; }
+            if (!requireApiKey()) return;
             setIsFetchingPubMed(true); setApiError(""); setPubMedResults(""); setPubMedLinks([]); setPubMedOptimizedQuery("");
-            
+
             try {
+                // ✅ Model: gemini-1.5-flash — stabilný
                 const optRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -218,6 +268,11 @@
                         contents: [{ parts: [{ text: `Translate and optimize this user query into a highly specific English search query for the PubMed database. Use appropriate boolean operators (AND, OR) if needed. Return ONLY the English search query string, nothing else. User query: "${pubMedQuery}"` }] }]
                     })
                 });
+
+                if (!optRes.ok) {
+                  const errData = await optRes.json().catch(() => ({}));
+                  throw new Error(errData?.error?.message || `HTTP ${optRes.status}`);
+                }
                 const optData = await optRes.json();
                 const optimizedSearchTerm = optData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || pubMedQuery;
                 setPubMedOptimizedQuery(optimizedSearchTerm);
@@ -226,7 +281,7 @@
                 if (!searchRes.ok) throw new Error("Nepodarilo sa pripojiť k PubMed.");
                 const searchData = await searchRes.json();
                 const ids = searchData.esearchresult.idlist;
-                
+
                 if (!ids || ids.length === 0) {
                     setPubMedResults(`Nenašli sa žiadne štúdie pre termín: ${optimizedSearchTerm}`);
                     setIsFetchingPubMed(false);
@@ -241,16 +296,21 @@
 
                 const summaryPrompt = `Tu sú abstrakty štúdií z databázy PubMed k téme "${pubMedQuery}":\n\n${xmlText.substring(0, 8000)}\n\nVytvor stručný výťah najdôležitejších záverov v slovenčine. Zásadné pravidlo: Vysvetli to ľudskou rečou pre laikov, vyhni sa ťažkým medicínskym termínom (alebo ich hneď vysvetli). Zvýrazni (**tučným písmom**) tie najzaujímavejšie fakty a vety, ktoré sú vyslovene ideálne pre priame použitie a skopírovanie do Instagram slidov. Čerpaj len z poskytnutého textu.`;
 
+                // ✅ Model: gemini-1.5-flash — stabilný
                 const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: summaryPrompt }] }] })
                 });
-                
+
+                if (!aiRes.ok) {
+                  const errData = await aiRes.json().catch(() => ({}));
+                  throw new Error(errData?.error?.message || `HTTP ${aiRes.status}`);
+                }
                 const aiData = await aiRes.json();
                 const summaryText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
                 setPubMedResults(summaryText || "Nepodarilo sa vygenerovať sumár.");
-                
+
             } catch (e) {
                 setApiError("PubMed chyba: " + e.message);
             } finally {
@@ -260,13 +320,14 @@
 
           const generateWithAI = async () => {
             if (!topic.trim()) { setApiError("Zadaj najprv tému."); return; }
+            if (!requireApiKey()) return;
             setLoading(true); setApiError("");
 
             const userQuery = `Vytvor kompletný Instagram karusel v slovenčine na tému: "${topic}".
-            Karusel musí mať 5 slidov. Vráť iba čistý JSON objekt podľa schémy: 
+            Karusel musí mať 5 slidov. Vráť iba čistý JSON objekt podľa schémy:
             { "slides": [ { "type": "cover"|"content"|"outro", "title": "...", "bullets": ["..."], "content": "..." } ] }`;
 
-            const systemPrompt = `Si copywriter pre Instagram. Generuj JSON pre karusel. 
+            const systemPrompt = `Si copywriter pre Instagram. Generuj JSON pre karusel.
             ZÁSADNÉ PRAVIDLO PRE 'content' (obsah slidu):
             Text musí byť presne v tejto dĺžke a štruktúre. Toto je tvoj vzor:
             "**Regulácia vápnika v bunkách:** Mechanizmus účinku spočíva v ovplyvnení tzv. "vápnikových dráh" (signálna cesta STIM1/Orai1/NFAT3). Nadmerný vstup vápnika do buniek totiž vedie k ich poškodeniu a nekontrolovanému rastu tkaniva.
@@ -274,6 +335,7 @@
             (Zvýrazňuj kľúčové frázy do **dvojitých hviezdičiek**). Píš overene a vecne, presne v rozsahu 3-4 stručných viet. Nikdy negeneruj siahodlhé texty.`;
 
             try {
+              // ✅ Model: gemini-1.5-flash — stabilný
               const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -284,15 +346,24 @@
                 })
               });
 
-              if (!response.ok) throw new Error("Chyba spojenia");
+              if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData?.error?.message || `HTTP ${response.status}`);
+              }
               const data = await response.json();
               const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-              
+
               if (text) {
-                const cleanJson = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+                // ✅ FIX: Robustné čistenie markdown wrappera pred JSON.parse
+                const cleanJson = text
+                  .replace(/^```json\s*/i, '')
+                  .replace(/^```\s*/i, '')
+                  .replace(/\s*```$/i, '')
+                  .trim();
+
                 const parsed = JSON.parse(cleanJson);
-                
-                if (parsed.slides) {
+
+                if (parsed.slides && Array.isArray(parsed.slides)) {
                   const formatted = parsed.slides.map(s => ({
                     ...s,
                     imageLayout: s.type === 'cover' ? 'none' : 'center-right',
@@ -300,7 +371,11 @@
                   }));
                   setSlides(formatted);
                   setActiveIndex(0);
+                } else {
+                  throw new Error("AI vrátila neplatný formát slidov.");
                 }
+              } else {
+                throw new Error("AI nevrátila žiadny obsah.");
               }
             } catch (e) {
               setApiError("Chyba pri generovaní obsahu: " + e.message);
@@ -344,7 +419,7 @@
 
             const layout = slide.imageLayout || 'none';
             const hasImage = slide.image && layout !== 'none';
-            const imgSize = 360; 
+            const imgSize = 360;
 
             let imgX = 0, imgY = 0;
             if (layout.includes('left')) imgX = 80;
@@ -352,17 +427,17 @@
             else imgX = (width - imgSize) / 2;
 
             if (layout.includes('top')) imgY = 240;
-            else if (layout.includes('bottom')) imgY = 800; 
+            else if (layout.includes('bottom')) imgY = 800;
             else imgY = (height - imgSize) / 2;
 
             let textX = 80;
             let textMaxWidth = width - 160;
-            let titleY = 230; 
-            
+            let titleY = 230;
+
             if (hasImage) {
-                if (layout.includes('left')) { textX = imgX + imgSize + 40; textMaxWidth = width - textX - 80; } 
-                else if (layout.includes('right')) { textMaxWidth = width - 160 - imgSize - 40; } 
-                else if (layout.includes('top')) { titleY = imgY + imgSize + 50; } 
+                if (layout.includes('left')) { textX = imgX + imgSize + 40; textMaxWidth = width - textX - 80; }
+                else if (layout.includes('right')) { textMaxWidth = width - 160 - imgSize - 40; }
+                else if (layout.includes('top')) { titleY = imgY + imgSize + 50; }
                 else if (layout.includes('center-center')) { textMaxWidth = width - 160; }
             }
 
@@ -374,7 +449,7 @@
                   ctx.beginPath(); ctx.roundRect(imgX, imgY, imgSize, imgSize, 24); ctx.clip();
                   const imgRatio = imgObj.width / imgObj.height;
                   let drawW = imgSize, drawH = imgSize, drawX = imgX, drawY = imgY;
-                  if (imgRatio > 1) { drawW = imgSize * imgRatio; drawX = imgX - (drawW - imgSize) / 2; } 
+                  if (imgRatio > 1) { drawW = imgSize * imgRatio; drawX = imgX - (drawW - imgSize) / 2; }
                   else { drawH = imgSize / imgRatio; drawY = imgY - (drawH - imgSize) / 2; }
                   ctx.drawImage(imgObj, drawX, drawY, drawW, drawH);
                   ctx.restore();
@@ -409,7 +484,7 @@
                   ctx.fillText(currentTitleLine.trim(), textX, currY);
 
                   ctx.fillStyle = brandColor; ctx.fillRect(textX, currY + 50, 150, 10);
-                  
+
                   if (slide.bullets && slide.bullets.length > 0) {
                       let bY = currY + 150;
                       slide.bullets.forEach(b => {
@@ -433,11 +508,11 @@
                   ctx.fillText(currentTitleLine.trim(), textX, currY);
 
                   const content = slide.content || '';
-                  const paragraphs = content.split('\n'); 
+                  const paragraphs = content.split('\n');
                   let textBodyY = currY + 110;
-                  
+
                   paragraphs.forEach(paragraph => {
-                    if(!paragraph.trim()) { textBodyY += 25; return; } 
+                    if(!paragraph.trim()) { textBodyY += 25; return; }
                     const tokens = parseMarkdownBold(paragraph);
                     let currentX = textX;
                     tokens.forEach(token => {
@@ -449,14 +524,14 @@
                         const wordWidth = ctx.measureText(wordWithSpace).width;
 
                         if (currentX + wordWidth > textX + textMaxWidth) {
-                          currentX = textX; textBodyY += 55; 
+                          currentX = textX; textBodyY += 55;
                         }
                         ctx.fillStyle = token.isBold ? '#ffffff' : '#d1d5db';
                         ctx.fillText(wordWithSpace, currentX, textBodyY);
                         currentX += wordWidth;
                       });
                     });
-                    textBodyY += 55; 
+                    textBodyY += 55;
                   });
                 }
             };
@@ -471,7 +546,7 @@
                   ctx.beginPath(); ctx.arc(avatarX + 35, footerY - 10, 35, 0, Math.PI * 2); ctx.clip();
                   const lRatio = imgLogo.width / imgLogo.height;
                   let lW = 70, lH = 70, lX = avatarX, lY = footerY - 45;
-                  if (lRatio > 1) { lW = 70 * lRatio; lX = avatarX - (lW - 70) / 2; } 
+                  if (lRatio > 1) { lW = 70 * lRatio; lX = avatarX - (lW - 70) / 2; }
                   else { lH = 70 / lRatio; lY = (footerY - 45) - (lH - 70) / 2; }
                   ctx.drawImage(imgLogo, lX, lY, lW, lH);
                   ctx.restore();
@@ -489,7 +564,7 @@
                 }
               };
               if (avatarPreview) {
-                if (imageCache.current[avatarPreview]) { renderLogoCircle(imageCache.current[avatarPreview]); } 
+                if (imageCache.current[avatarPreview]) { renderLogoCircle(imageCache.current[avatarPreview]); }
                 else { const imgL = new Image(); imgL.src = avatarPreview; imgL.onload = () => { imageCache.current[avatarPreview] = imgL; renderLogoCircle(imgL); }; }
               } else { renderLogoCircle(null); }
             };
@@ -530,14 +605,19 @@
                   <div className="w-full max-w-[340px] aspect-[4/5] rounded-2xl overflow-hidden shadow-2xl border border-slate-700" style={{backgroundColor: bgColor}}>
                     <canvas ref={canvasRef} className="w-full h-full object-contain" />
                   </div>
-                  
+
                   <div className="flex items-center justify-between w-full max-w-[340px] mt-3 bg-slate-950 p-2 rounded-xl border border-slate-800">
                     <button onClick={() => setActiveIndex(p => Math.max(0, p - 1))} disabled={activeIndex === 0} className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg disabled:opacity-20"><Icons.ArrowLeft /></button>
                     <span className="text-xs font-bold text-slate-400">Slide {activeIndex + 1} / {slides.length}</span>
                     <button onClick={() => setActiveIndex(p => Math.min(slides.length - 1, p + 1))} disabled={activeIndex === slides.length - 1} className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg disabled:opacity-20"><Icons.ArrowRight /></button>
                   </div>
 
-                  <button onClick={() => drawSlideToCanvas(activeIndex, () => triggerDownload(activeIndex))} 
+                  <button onClick={addBlankSlide}
+                    className="w-full max-w-[340px] mt-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition">
+                    <Icons.Plus /> <span>PRIDAŤ PRÁZDNY SLIDE</span>
+                  </button>
+
+                  <button onClick={() => drawSlideToCanvas(activeIndex, () => triggerDownload(activeIndex))}
                     className="w-full max-w-[340px] mt-3 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 shadow-lg transition">
                     <Icons.Download /> <span>STIAHNUŤ TENTO SLIDE (PNG)</span>
                   </button>
@@ -545,10 +625,35 @@
 
                 {/* CONTROLS */}
                 <div className="p-4 space-y-5 flex-1 max-w-xl mx-auto w-full pb-20">
-                  
+
                   {/* Nastavenie Profilu */}
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider heading-font">Nastavenie Profilu</h3>
+
+                    {/* ✅ FIX: API Kľúč input — ukladá sa do localStorage, nikdy do kódu */}
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 flex items-center space-x-1">
+                        <span>🔑 GEMINI API KĽÚČ</span>
+                        {apiKey && <span className="text-emerald-400 ml-2">✓ Nastavený</span>}
+                      </label>
+                      <div className="flex space-x-2">
+                        <input
+                          type={showApiKey ? "text" : "password"}
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          placeholder="Vlož sem tvoj Gemini API kľúč (AIza...)"
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          onClick={() => setShowApiKey(v => !v)}
+                          className="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-400"
+                        >
+                          {showApiKey ? "Skryť" : "Zobraziť"}
+                        </button>
+                      </div>
+                      <p className="text-[9px] text-slate-500 mt-1">Kľúč sa ukladá len lokálne v prehliadači. Nikdy nejde na server.</p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <div className="col-span-2">
                         <label className="block text-[10px] text-slate-400 mb-1">PROFIL @HANDLE</label>
@@ -578,7 +683,7 @@
                         <div className="flex items-center space-x-2"><Icons.Search /><h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider heading-font">Výskum & Fakty (PubMed)</h3></div>
                         {isPubMedOpen ? <Icons.ChevronUp /> : <Icons.ChevronDown />}
                     </button>
-                    
+
                     <div className={`collapse-content ${isPubMedOpen ? 'max-h-[1000px] mt-4 opacity-100' : 'max-h-0 opacity-0'}`}>
                         <div className="space-y-3">
                             <p className="text-[10px] text-slate-400">Preložíme tvoju tému do angličtiny, nájdeme štúdie a vytvoríme výťah faktov, ktoré skopíruješ do slidov.</p>
@@ -588,7 +693,7 @@
                                     {isFetchingPubMed ? '⏳ Hľadám...' : 'Hľadať v NCBI'}
                                 </button>
                             </div>
-                            
+
                             {pubMedOptimizedQuery && <p className="text-[9px] text-slate-500 italic">Preložený dopyt: {pubMedOptimizedQuery}</p>}
                             {apiError && <p className="text-xs text-rose-500 mt-2">{apiError}</p>}
 
@@ -606,7 +711,8 @@
                             {pubMedResults && (
                                 <div className="mt-3 p-3 bg-slate-900 border border-slate-700 rounded-lg">
                                     <p className="text-[10px] text-amber-400 font-bold mb-2">Pripravené fakty pre tvoj Slide (skopíruj si to):</p>
-                                    <div className="text-xs text-slate-300 space-y-2 leading-relaxed" style={{whiteSpace: "pre-line"}} dangerouslySetInnerHTML={{__html: pubMedResults.replace(/\*\*(.*?)\*\*/g, '<span class="text-white font-bold">$1</span>')}}></div>
+                                    {/* ✅ FIX: sanitizeHtml pred dangerouslySetInnerHTML (ochrana pred XSS) */}
+                                    <div className="text-xs text-slate-300 space-y-2 leading-relaxed" style={{whiteSpace: "pre-line"}} dangerouslySetInnerHTML={{__html: sanitizeHtml(pubMedResults.replace(/\*\*(.*?)\*\*/g, '<span class="text-white font-bold">$1</span>'))}}></div>
                                 </div>
                             )}
                         </div>
@@ -622,12 +728,13 @@
                         {loading ? 'Generujem...' : 'Vygenerovať'}
                       </button>
                     </div>
+                    {apiError && !isPubMedOpen && <p className="text-xs text-rose-500">{apiError}</p>}
                   </div>
 
                   {/* Editor */}
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider heading-font">Editor Slidu {activeIndex + 1}</h3>
-                    
+
                     <div className="space-y-1">
                       <label className="block text-[10px] text-slate-400">NADPIS</label>
                       <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
@@ -650,7 +757,7 @@
                       <div className="flex items-center justify-between">
                           <label className="block text-[10px] text-slate-400 font-bold">OBRÁZOK NA SLIDE (9-Mriežka)</label>
                       </div>
-                      
+
                       <select value={slides[activeIndex]?.imageLayout || 'none'} onChange={setSlideLayout} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none">
                           {LAYOUT_OPTIONS.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
                       </select>
@@ -658,12 +765,12 @@
                       {slides[activeIndex]?.imageLayout !== 'none' && (
                         <div className="space-y-3 pt-2">
                           <div className="flex space-x-2">
-                            <input type="text" placeholder="Prompt pre Nanobanana AI obrázok..." value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none" />
+                            <input type="text" placeholder="Prompt pre AI obrázok..." value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none" />
                             <button onClick={generateNanobananaImage} disabled={imgLoading} className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs px-3 rounded-lg font-bold transition flex items-center space-x-1">
                               <Icons.Image /> <span>{imgLoading ? '...' : 'Generovať'}</span>
                             </button>
                           </div>
-                          
+
                           <button onClick={() => slideImageFileInputRef.current.click()} className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg py-2 text-xs font-bold flex items-center justify-center space-x-2 text-slate-300">
                             <Icons.Upload /> <span>Nahrať vlastnú fotku z mobilu</span>
                           </button>
