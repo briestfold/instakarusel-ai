@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InstaKarusel AI PRO V7</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@700&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; }
+        .heading-font { font-family: 'Space Grotesk', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .collapse-content { transition: max-height 0.3s ease-in-out; overflow: hidden; }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const Icons = {
+            Sparkles: () => <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l-1.81-5.096L2.1 14.1 7.19 12.3 9 7.19l1.81 5.11 5.096 1.81-5.096 1.81zM19.071 4.929l-.707 1.98-.707-1.98-1.98-.707 1.98-.707.707-1.98.707 1.98 1.98.707-1.98.707z"></path></svg>,
+            Download: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>,
+            Plus: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"></path></svg>,
+            Trash: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>,
+            Instagram: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>,
+            Upload: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>,
+            ArrowLeft: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>,
+            ArrowRight: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>,
+            Save: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>,
+            Search: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>,
+            ChevronDown: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"></path></svg>,
+            ChevronUp: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7"></path></svg>,
+            Image: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+        };
+
+        const apiKey = "AQ.Ab8RN6JmPszN-l_bJonJIpBH4yQGQEgbU2JEikSaaQajfi5qmA"; 
+
+        const INITIAL_SLIDES = [
+          { type: "cover", title: "REGULÁCIA VÁPNIKA", bullets: ["Bunkové dráhy", "Prevencia zápalu"], imageLayout: "none", image: null },
+          { type: "content", title: "MECHANIZMUS ÚČINKU", content: "**Regulácia vápnika v bunkách:** Mechanizmus účinku spočíva v ovplyvnení tzv. \"vápnikových dráh\".\n\n**Menej zápalu:** Okrem boja proti hypertrofii táto látka významne chráni bunky.", imageLayout: "center-right", image: null }
+        ];
+
+        const LAYOUT_OPTIONS = [
+            { id: 'top-left', label: 'Hore Vľavo' }, { id: 'top-center', label: 'Hore Stred' }, { id: 'top-right', label: 'Hore Vpravo' },
+            { id: 'center-left', label: 'Stred Vľavo' }, { id: 'center-center', label: 'Stred' }, { id: 'center-right', label: 'Stred Vpravo' },
+            { id: 'bottom-left', label: 'Dole Vľavo' }, { id: 'bottom-center', label: 'Dole Stred' }, { id: 'bottom-right', label: 'Dole Vpravo' },
+            { id: 'none', label: 'Žiadny obrázok' }
+        ];
+
+        function App() {
+          const [slides, setSlides] = useState(() => { const saved = localStorage.getItem('insta_v7_slides'); return saved ? JSON.parse(saved) : INITIAL_SLIDES; });
+          const [activeIndex, setActiveIndex] = useState(0);
+          const [instagramHandle, setInstagramHandle] = useState(() => localStorage.getItem('insta_v7_handle') || "@tvoj_profil");
+          const [brandColor, setBrandColor] = useState(() => localStorage.getItem('insta_v7_color') || "#3b82f6");
+          const [bgColor, setBgColor] = useState(() => localStorage.getItem('insta_v7_bgColor') || "#0b0f19");
+          const [avatarPreview, setAvatarPreview] = useState(() => localStorage.getItem('insta_v7_avatar') || "");
+          const [topic, setTopic] = useState("");
+          const [loading, setLoading] = useState(false);
+          const [apiError, setApiError] = useState("");
+          const [editTitle, setEditTitle] = useState("");
+          const [editContent, setEditContent] = useState("");
+          const [editBullets, setEditBullets] = useState("");
+          const [imagePrompt, setImagePrompt] = useState("");
+          const [imgLoading, setImgLoading] = useState(false);
+          const [pubMedQuery, setPubMedQuery] = useState("");
+          const [pubMedResults, setPubMedResults] = useState("");
+          const [isFetchingPubMed, setIsFetchingPubMed] = useState(false);
+          const [isPubMedOpen, setIsPubMedOpen] = useState(false);
+          const [pubMedLinks, setPubMedLinks] = useState([]);
+          const canvasRef = useRef(null);
+          const fileInputRef = useRef(null);
+          const slideImageFileInputRef = useRef(null);
+          const imageCache = useRef({});
+
+          useEffect(() => { localStorage.setItem('insta_v7_slides', JSON.stringify(slides)); }, [slides]);
+          useEffect(() => { localStorage.setItem('insta_v7_handle', instagramHandle); localStorage.setItem('insta_v7_color', brandColor); localStorage.setItem('insta_v7_bgColor', bgColor); localStorage.setItem('insta_v7_avatar', avatarPreview); }, [instagramHandle, brandColor, bgColor, avatarPreview]);
+
+          useEffect(() => {
+            if (slides[activeIndex]) {
+              setEditTitle(slides[activeIndex].title || "");
+              setEditContent(slides[activeIndex].content || "");
+              setEditBullets(slides[activeIndex].bullets ? slides[activeIndex].bullets.join(", ") : "");
+            }
+          }, [activeIndex, slides]);
+
+          useEffect(() => {
+            const timer = setTimeout(() => {
+                if (!slides[activeIndex]) return;
+                const updated = [...slides];
+                updated[activeIndex] = { ...updated[activeIndex], title: editTitle.toUpperCase(), content: editContent, bullets: editBullets ? editBullets.split(",").map(b => b.trim()) : undefined };
+                setSlides(updated);
+            }, 300);
+            return () => clearTimeout(timer);
+          }, [editTitle, editContent, editBullets]);
+
+          const handleAvatarChange = (e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setAvatarPreview(reader.result); reader.readAsDataURL(file); } };
+          const handleSlideImageUpload = (e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { const updated = [...slides]; updated[activeIndex] = { ...updated[activeIndex], image: reader.result, imageLayout: updated[activeIndex].imageLayout === 'none' ? 'center-right' : updated[activeIndex].imageLayout }; setSlides(updated); }; reader.readAsDataURL(file); } };
+          const setSlideLayout = (e) => { const layout = e.target.value; const updated = [...slides]; updated[activeIndex].imageLayout = layout; if (layout === 'none') updated[activeIndex].image = null; setSlides(updated); };
+
+          const generateWithAI = async () => {
+            if (!topic.trim()) { setApiError("Zadaj tému."); return; }
+            setLoading(true); setApiError("");
+            const userQuery = `Vytvor 5 slidov na tému: "${topic}". Vráť čistý JSON: { "slides": [ { "type": "cover"|"content"|"outro", "title": "...", "bullets": ["..."], "content": "..." } ] }`;
+            try {
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: userQuery }] }], generationConfig: { responseMimeType: "application/json" } })
+              });
+              const data = await response.json();
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+              const parsed = JSON.parse(text.replace(/```json/g, '').replace(/```/g, ''));
+              setSlides(parsed.slides);
+            } catch (e) { setApiError("Chyba: " + e.message); } finally { setLoading(false); }
+          };
+
+          const drawSlideToCanvas = (slideIndex) => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const slide = slides[slideIndex];
+            if (!slide) return;
+            canvas.width = 1080; canvas.height = 1350;
+            ctx.fillStyle = bgColor; ctx.fillRect(0, 0, 1080, 1350);
+            // Jednoduchý render pre preview - v plnom exporte by bola logika drawSlideImage
+            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 60px system-ui'; ctx.fillText(slide.title, 100, 200);
+          };
+
+          useEffect(() => { drawSlideToCanvas(activeIndex); }, [activeIndex, slides, bgColor]);
+
+          return (
+            <div className="min-h-screen bg-slate-900 p-4">
+              <header className="mb-4 flex items-center justify-between">
+                <h1 className="text-xl font-bold">InstaKarusel PRO V7</h1>
+              </header>
+              <div className="space-y-4">
+                 <input type="text" value={instagramHandle} onChange={(e) => setInstagramHandle(e.target.value)} className="w-full p-2 bg-slate-800 rounded" placeholder="@handle"/>
+                 <div className="flex gap-2">
+                    <input type="color" value={brandColor} onChange={(e) => setBrandColor(e.target.value)} className="h-10 w-10"/>
+                    <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="h-10 w-10"/>
+                 </div>
+                 <input type="text" value={topic} onChange={(e) => setTopic(e.target.value)} className="w-full p-2 bg-slate-800 rounded" placeholder="Téma..."/>
+                 <button onClick={generateWithAI} className="w-full p-2 bg-indigo-600 rounded">{loading ? "Generujem..." : "Generovať"}</button>
+                 <canvas ref={canvasRef} className="w-full max-w-[300px] border border-slate-700 mx-auto" />
+              </div>
+            </div>
+          );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
