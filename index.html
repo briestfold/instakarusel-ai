@@ -127,7 +127,13 @@
 
           // ✅ FIX: Ukladanie API kľúča do localStorage
           useEffect(() => { localStorage.setItem('insta_v7_apiKey', apiKey); }, [apiKey]);
-          useEffect(() => { localStorage.setItem('insta_v7_slides', JSON.stringify(slides)); }, [slides]);
+          useEffect(() => {
+            try {
+              // Obrázky (base64) sa neukladajú do localStorage — príliš veľké, crashujú mobil
+              const slidesToSave = slides.map(s => ({ ...s, image: null }));
+              localStorage.setItem('insta_v7_slides', JSON.stringify(slidesToSave));
+            } catch(e) { console.warn('localStorage save failed:', e); }
+          }, [slides]);
           useEffect(() => { localStorage.setItem('insta_v7_handle', instagramHandle); }, [instagramHandle]);
           useEffect(() => { localStorage.setItem('insta_v7_color', brandColor); }, [brandColor]);
           useEffect(() => { localStorage.setItem('insta_v7_bgColor', bgColor); }, [bgColor]);
@@ -327,15 +333,32 @@
             setLoading(true); setApiError("");
 
             const userQuery = `Vytvor kompletný Instagram karusel v slovenčine na tému: "${topic}".
-            Karusel musí mať 5 slidov. Vráť iba čistý JSON objekt podľa schémy:
+            Karusel musí mať presne 5 slidov: Slide 1 = cover, Slidy 2-4 = content, Slide 5 = outro.
+            Vráť iba čistý JSON objekt podľa schémy:
             { "slides": [ { "type": "cover"|"content"|"outro", "title": "...", "bullets": ["..."], "content": "..." } ] }`;
 
-            const systemPrompt = `Si copywriter pre Instagram. Generuj JSON pre karusel.
-            ZÁSADNÉ PRAVIDLO PRE 'content' (obsah slidu):
-            Text musí byť presne v tejto dĺžke a štruktúre. Toto je tvoj vzor:
-            "**Regulácia vápnika v bunkách:** Mechanizmus účinku spočíva v ovplyvnení tzv. "vápnikových dráh" (signálna cesta STIM1/Orai1/NFAT3). Nadmerný vstup vápnika do buniek totiž vedie k ich poškodeniu a nekontrolovanému rastu tkaniva.
-            **Menej zápalu a bunkovej smrti:** Okrem boja proti hypertrofii táto látka významne chráni bunky."
-            (Zvýrazňuj kľúčové frázy do **dvojitých hviezdičiek**). Píš overene a vecne, presne v rozsahu 3-4 stručných viet. Nikdy negeneruj siahodlhé texty.`;
+            const systemPrompt = `Si skúsený Instagram copywriter pre fitness trénerov. Generuj JSON pre Instagram karusel.
+
+ŠTRUKTÚRA (5 slidov):
+- Slide 1 (cover): chytľavý nadpis + bullets = 2-3 tézy čo sa čitateľ dozvie. content = "".
+- Slidy 2-4 (content): každý jeden konkrétny fakt/tip. bullets = [].
+- Slide 5 (outro): zhrnutie + CTA. bullets = [].
+
+PRAVIDLÁ PRE content slidy:
+- Presne 2 odseky oddelené prázdnym riadkom (\\n\\n), každý začína **tučnou frázou s dvojbodkou**
+- Každý odsek max 2 vety, informačné ale ľudské a pútavé
+- Pridaj 1 relevantné emoji na odsek (napr. 💪 🧠 ⚡ 🔥 ✅ 🎯)
+- Kľúčové čísla a slová zvýrazni **hviezdičkami**
+
+VZOR content slidu:
+"**Proteín je kráľ regenerácie 💪:** Počas prvých 2 hodín po tréningu telo absorbuje živiny výrazne rýchlejšie ako v kľude.
+
+**Ideálna dávka ✅:** Výskum odporúča **20-40g proteínu** ihneď po tréningu — zodpovedá to 150g kuracieho alebo proteínovému shaku."
+
+PRAVIDLÁ PRE outro slide:
+- title: výstižné zhrnutie max 5 slov (napr. "ČO SI Z TOHO ODNIESŤ")
+- content: 2 kľúčové takeaway z karuselu + výzva uložiť/zdieľať post (s emoji)
+- bullets: []`;
 
             try {
               // ✅ Model: gemini-2.5-flash — stabilný
@@ -369,7 +392,7 @@
                 if (parsed.slides && Array.isArray(parsed.slides)) {
                   const formatted = parsed.slides.map(s => ({
                     ...s,
-                    imageLayout: s.type === 'cover' ? 'none' : 'center-right',
+                    imageLayout: (s.type === 'cover' || s.type === 'outro') ? 'none' : 'center-right',
                     image: null
                   }));
                   setSlides(formatted);
@@ -472,7 +495,60 @@
 
             const renderTextBlock = () => {
                 ctx.fillStyle = '#ffffff';
-                if (slide.type === 'cover') {
+                if (slide.type === 'outro') {
+                  // --- OUTRO SLIDE ---
+                  ctx.fillStyle = brandColor; ctx.font = 'bold 28px system-ui';
+                  ctx.fillText('💡 ZÁVER', textX, titleY - 145);
+
+                  ctx.fillStyle = '#ffffff'; ctx.font = '900 58px system-ui';
+                  const titleWords = (slide.title || 'ČO SI Z TOHO ODNIESŤ').split(' ');
+                  let currentTitleLine = ''; let currY = titleY;
+                  for (let i = 0; i < titleWords.length; i++) {
+                    let testLine = currentTitleLine + titleWords[i] + ' ';
+                    if (ctx.measureText(testLine).width > textMaxWidth && i > 0) {
+                      ctx.fillText(currentTitleLine.trim(), textX, currY);
+                      currentTitleLine = titleWords[i] + ' '; currY += 68;
+                    } else { currentTitleLine = testLine; }
+                  }
+                  ctx.fillText(currentTitleLine.trim(), textX, currY);
+
+                  ctx.strokeStyle = brandColor; ctx.lineWidth = 4;
+                  ctx.beginPath(); ctx.moveTo(textX, currY + 28); ctx.lineTo(textX + 180, currY + 28); ctx.stroke();
+
+                  const content = slide.content || '';
+                  const paragraphs = content.split('\n');
+                  let textBodyY = currY + 90;
+                  paragraphs.forEach(paragraph => {
+                    if (!paragraph.trim()) { textBodyY += 20; return; }
+                    const tokens = parseMarkdownBold(paragraph);
+                    let currentX = textX;
+                    tokens.forEach(token => {
+                      const words = token.text.split(' ');
+                      words.forEach((word, wordIdx) => {
+                        if (word === '' && wordIdx > 0) return;
+                        const wordWithSpace = word + (wordIdx < words.length - 1 ? ' ' : '');
+                        ctx.font = `${token.isBold ? '700' : 'normal'} 30px system-ui`;
+                        const wordWidth = ctx.measureText(wordWithSpace).width;
+                        if (currentX + wordWidth > textX + textMaxWidth) { currentX = textX; textBodyY += 46; }
+                        ctx.fillStyle = token.isBold ? brandColor : '#cbd5e1';
+                        ctx.fillText(wordWithSpace, currentX, textBodyY);
+                        currentX += wordWidth;
+                      });
+                    });
+                    textBodyY += 46;
+                  });
+
+                  // CTA box
+                  const ctaY = Math.max(textBodyY + 60, height - 340);
+                  ctx.fillStyle = brandColor;
+                  ctx.beginPath(); ctx.roundRect(textX, ctaY, textMaxWidth, 130, 18); ctx.fill();
+                  ctx.fillStyle = '#000000'; ctx.font = 'bold 34px system-ui'; ctx.textAlign = 'center';
+                  ctx.fillText(`Sleduj ${instagramHandle} 🔔`, textX + textMaxWidth / 2, ctaY + 50);
+                  ctx.font = '26px system-ui';
+                  ctx.fillText('pre ďalšie tipy každý týždeň', textX + textMaxWidth / 2, ctaY + 95);
+                  ctx.textAlign = 'left';
+
+                } else if (slide.type === 'cover') {
                   ctx.fillStyle = brandColor; ctx.font = 'bold 24px system-ui'; ctx.fillText('DÔLEŽITÁ SÉRIA', textX, titleY - 145);
                   ctx.fillStyle = '#ffffff'; ctx.font = '900 78px system-ui';
                   const titleWords = (slide.title || '').split(' ');
@@ -687,7 +763,7 @@
                         {isPubMedOpen ? <Icons.ChevronUp /> : <Icons.ChevronDown />}
                     </button>
 
-                    <div className={`collapse-content ${isPubMedOpen ? 'max-h-[1000px] mt-4 opacity-100' : 'max-h-0 opacity-0'}`}>
+                    <div className={`collapse-content ${isPubMedOpen ? 'max-h-[3000px] mt-4 opacity-100' : 'max-h-0 opacity-0'}`}>
                         <div className="space-y-3">
                             <p className="text-[10px] text-slate-400">Preložíme tvoju tému do angličtiny, nájdeme štúdie a vytvoríme výťah faktov, ktoré skopíruješ do slidov.</p>
                             <div className="flex space-x-2">
@@ -715,7 +791,7 @@
                                 <div className="mt-3 p-3 bg-slate-900 border border-slate-700 rounded-lg">
                                     <p className="text-[10px] text-amber-400 font-bold mb-2">Pripravené fakty pre tvoj Slide (skopíruj si to):</p>
                                     {/* ✅ FIX: sanitizeHtml pred dangerouslySetInnerHTML (ochrana pred XSS) */}
-                                    <div className="text-xs text-slate-300 space-y-2 leading-relaxed" style={{whiteSpace: "pre-line"}} dangerouslySetInnerHTML={{__html: sanitizeHtml(pubMedResults.replace(/\*\*(.*?)\*\*/g, '<span class="text-white font-bold">$1</span>'))}}></div>
+                                    <div className="text-xs text-slate-300 space-y-2 leading-relaxed overflow-y-auto max-h-[500px]" style={{whiteSpace: "pre-line"}} dangerouslySetInnerHTML={{__html: sanitizeHtml(pubMedResults.replace(/\*\*(.*?)\*\*/g, '<span class="text-white font-bold">$1</span>'))}}></div>
                                 </div>
                             )}
                         </div>
