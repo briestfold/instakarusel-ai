@@ -103,6 +103,7 @@
 
           const [topic, setTopic] = useState("");
           const [loading, setLoading] = useState(false);
+          const [slideCount, setSlideCount] = useState(5);
           const [apiError, setApiError] = useState("");
           const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -371,17 +372,31 @@ Vytvor KVALITNÝ výťah pre Instagram v slovenčine:
             if (!requireApiKey()) return;
             setLoading(true); setApiError("");
 
+            const n = Math.min(Math.max(parseInt(slideCount) || 5, 1), 10);
+            const contentCount = Math.max(0, n - 2);
+            const hasCover = n >= 2;
+            const hasOutro = n >= 2;
+
+            const slideStructureDesc = n === 1
+              ? `Karusel má 1 slide: jeden content slide.`
+              : `Karusel má presne ${n} slidov: Slide 1 = cover${contentCount > 0 ? `, Slidy 2-${n-1} = content (${contentCount} ks)` : ''}, Slide ${n} = outro.`;
+
             const userQuery = `Vytvor kompletný Instagram karusel v slovenčine na tému: "${topic}".
-            Karusel musí mať presne 5 slidov: Slide 1 = cover, Slidy 2-4 = content, Slide 5 = outro.
+            ${slideStructureDesc}
             Vráť iba čistý JSON objekt podľa schémy:
             { "slides": [ { "type": "cover"|"content"|"outro", "title": "...", "bullets": ["..."], "content": "..." } ] }`;
 
+            const structureBlock = n === 1
+              ? `ŠTRUKTÚRA (1 slide):
+- Slide 1 (content): jeden konkrétny fakt/tip. bullets = [].`
+              : `ŠTRUKTÚRA (${n} slidov):
+- Slide 1 (cover): chytľavý nadpis + bullets = 2-3 tézy čo sa čitateľ dozvie. content = "".
+${contentCount > 0 ? `- Slidy 2-${n-1} (content): každý pokrýva iný konkrétny fakt/tip k téme. bullets = [].` : ''}
+- Slide ${n} (outro): zhrnutie + CTA. bullets = [].`;
+
             const systemPrompt = `Si skúsený Instagram copywriter pre fitness trénerov. Generuj JSON pre Instagram karusel.
 
-ŠTRUKTÚRA (5 slidov):
-- Slide 1 (cover): chytľavý nadpis + bullets = 2-3 tézy čo sa čitateľ dozvie. content = "".
-- Slidy 2-4 (content): každý jeden konkrétny fakt/tip. bullets = [].
-- Slide 5 (outro): zhrnutie + CTA. bullets = [].
+${structureBlock}
 
 PRAVIDLÁ PRE content slidy:
 - Presne 2 odseky oddelené prázdnym riadkom (\\n\\n), každý začína **tučnou frázou s dvojbodkou**
@@ -857,7 +872,11 @@ PRAVIDLÁ PRE outro slide:
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider heading-font">AI Tvorba karuselu</h3>
                     <div className="flex space-x-2">
-                      <input type="text" placeholder="Téma na 5 slidov (napr. Výhody spánku)" value={topic} onChange={(e) => setTopic(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                      <input type="text" placeholder="Téma karuselu (napr. Výhody spánku)" value={topic} onChange={(e) => setTopic(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                      <div className="flex items-center space-x-1">
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap">Slidov:</span>
+                        <input type="number" min="1" max="10" value={slideCount} onChange={(e) => setSlideCount(Math.min(10, Math.max(1, parseInt(e.target.value) || 5)))} className="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-xs text-white text-center focus:outline-none" />
+                      </div>
                       <button onClick={generateWithAI} disabled={loading} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-lg font-bold">
                         {loading ? 'Generujem...' : 'Vygenerovať'}
                       </button>
