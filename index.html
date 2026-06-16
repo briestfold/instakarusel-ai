@@ -263,8 +263,8 @@
             setIsFetchingPubMed(true); setApiError(""); setPubMedResults(""); setPubMedLinks([]); setPubMedOptimizedQuery("");
 
             try {
-                // ✅ Model: gemini-2.0-flash — stabilný
-                const optRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                // ✅ Model: gemini-2.5-flash — stabilný
+                const optRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -299,8 +299,8 @@
 
                 const summaryPrompt = `Tu sú abstrakty štúdií z databázy PubMed k téme "${pubMedQuery}":\n\n${xmlText.substring(0, 8000)}\n\nVytvor stručný výťah najdôležitejších záverov v slovenčine. Zásadné pravidlo: Vysvetli to ľudskou rečou pre laikov, vyhni sa ťažkým medicínskym termínom (alebo ich hneď vysvetli). Zvýrazni (**tučným písmom**) tie najzaujímavejšie fakty a vety, ktoré sú vyslovene ideálne pre priame použitie a skopírovanie do Instagram slidov. Čerpaj len z poskytnutého textu.`;
 
-                // ✅ Model: gemini-2.0-flash — stabilný
-                const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                // ✅ Model: gemini-2.5-flash — stabilný
+                const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: summaryPrompt }] }] })
@@ -338,8 +338,8 @@
             (Zvýrazňuj kľúčové frázy do **dvojitých hviezdičiek**). Píš overene a vecne, presne v rozsahu 3-4 stručných viet. Nikdy negeneruj siahodlhé texty.`;
 
             try {
-              // ✅ Model: gemini-2.0-flash — stabilný
-              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+              // ✅ Model: gemini-2.5-flash — stabilný
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
