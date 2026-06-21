@@ -19,6 +19,10 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .collapse-content { transition: max-height 0.3s ease-in-out; overflow: hidden; }
+        /* Skrytie natívnych šípok number inputu — vlastný stepper funguje rovnako na PC aj mobile */
+        .slide-stepper-input::-webkit-outer-spin-button,
+        .slide-stepper-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .slide-stepper-input { -moz-appearance: textfield; appearance: textfield; }
     </style>
 </head>
 <body class="text-slate-100 min-h-screen">
@@ -875,7 +879,14 @@ PRAVIDLÁ PRE outro slide:
                       <input type="text" placeholder="Téma karuselu (napr. Výhody spánku)" value={topic} onChange={(e) => setTopic(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
                       <div className="flex items-center space-x-1">
                         <span className="text-[10px] text-slate-400 whitespace-nowrap">Slidov:</span>
-                        <input type="number" min="1" max="10" value={slideCount} onChange={(e) => setSlideCount(Math.min(10, Math.max(1, parseInt(e.target.value) || 5)))} className="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-xs text-white text-center focus:outline-none" />
+                        <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+                          <button type="button" aria-label="Menej slidov" onClick={() => setSlideCount((c) => Math.max(1, (parseInt(c) || 5) - 1))} className="px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 active:bg-slate-700 select-none leading-none">−</button>
+                          <input type="number" inputMode="numeric" min="1" max="10" value={slideCount}
+                            onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setSlideCount(Math.min(10, Math.max(1, v))); }}
+                            onBlur={(e) => { const v = parseInt(e.target.value, 10); setSlideCount(isNaN(v) ? 5 : Math.min(10, Math.max(1, v))); }}
+                            className="slide-stepper-input w-9 bg-transparent px-1 py-2 text-xs text-white text-center focus:outline-none" />
+                          <button type="button" aria-label="Viac slidov" onClick={() => setSlideCount((c) => Math.min(10, (parseInt(c) || 5) + 1))} className="px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 active:bg-slate-700 select-none leading-none">+</button>
+                        </div>
                       </div>
                       <button onClick={generateWithAI} disabled={loading} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-lg font-bold">
                         {loading ? 'Generujem...' : 'Vygenerovať'}
